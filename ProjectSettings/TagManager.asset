@@ -7,6 +7,8 @@ TagManager:
   - DeathArea
   - DeathAreaPlayer
   - Heart
+  - Door
+  - Diyalog
   layers:
   - Default
   - TransparentFX
@@ -15,7 +17,7 @@ TagManager:
   - Water
   - UI
   - Effects
-  - 
+  - Enemy
   - 
   - 
   - 
@@ -49,6 +51,9 @@ TagManager:
     locked: 0
   - name: Effects
     uniqueID: 1621210913
+    locked: 0
+  - name: UI
+    uniqueID: 1440155807
     locked: 0
   m_RenderingLayers:
   - Default

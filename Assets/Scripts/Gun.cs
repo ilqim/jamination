@@ -1,5 +1,6 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 
 public class Gun : MonoBehaviour
 {
@@ -13,10 +14,17 @@ public class Gun : MonoBehaviour
     public float bulletSpeed = 12f;
 
     [Tooltip("İki atış arasındaki bekleme (saniye). Örn: 1.0 = saniyede 1 mermi")]
-    [SerializeField] private float fireCooldown = 1.0f; // <<< EKLENDİ
+    [SerializeField] private float fireCooldown = 1.0f;
     [Tooltip("Basılı tutarken de (GetMouseButton) cooldown doldukça ateş etsin mi?")]
-    [SerializeField] private bool autoFire = false;      // <<< EKLENDİ
-    private float nextFireTime = 0f;                     // <<< EKLENDİ
+    [SerializeField] private bool autoFire = false;
+    private float nextFireTime = 0f;
+
+    [Header("Çok Mermili (Multi Shot)")]
+    [SerializeField] private bool multiShot = false;                   // ✅ işaretlersen çoklu atış
+    [Tooltip("Child'lardaki BulletSpawn noktalarını sırayla (alttan üste) ekle")]
+    [SerializeField] private List<Transform> bulletSpawns = new();     // 0,1,2... alttan üste
+    [Tooltip("Her spawn için mouse yönüne göre derece cinsinden offset. (1. spawn için 0=mouse yönü)")]
+    [SerializeField] private List<float> angleOffsetsDeg = new();      // ör: [ -20, 0, +20 ]
 
     [Header("Muzzle Flash (Particle)")]
     public ParticleSystem muzzleFlashInstance;
@@ -38,10 +46,12 @@ public class Gun : MonoBehaviour
         if (firePoint == null && transform.childCount > 0) firePoint = transform.GetChild(0);
         if (shellEjectPoint == null) shellEjectPoint = firePoint;
 
+        // Muzzle flash’ı firePoint’e parent et (kayma olmasın)
         if (muzzleFlashInstance != null && firePoint != null)
         {
-            // muzzleFlashInstance.transform.position = firePoint.position;
-            muzzleFlashInstance.transform.rotation = firePoint.rotation;
+            // muzzleFlashInstance.transform.SetParent(firePoint, worldPositionStays: true);
+            // muzzleFlashInstance.transform.localPosition = Vector3.zero;
+            // muzzleFlashInstance.transform.localRotation = Quaternion.identity;
         }
     }
 
@@ -62,15 +72,11 @@ public class Gun : MonoBehaviour
         float angleSigned = Mathf.Atan2(aimDirection.y, aimDirection.x) * Mathf.Rad2Deg;
         parentToRotate.eulerAngles = new Vector3(0f, 0f, angleSigned);
 
+        // (Not: scale ile flip etmeyi önermem; mümkünse görselde flipX kullan)
         Vector3 s = parentToRotate.localScale;
         if (angleSigned > 90f || angleSigned < -90f) { s.x = -Mathf.Abs(s.x); s.y = -Mathf.Abs(s.y); }
         else { s.x =  Mathf.Abs(s.x); s.y =  Mathf.Abs(s.y); }
         parentToRotate.localScale = s;
-
-        // if (muzzleFlashInstance != null && firePoint != null)
-        // {
-        //     muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
-        // }
 
         if (showDebug) Debug.Log($"angleSigned: {angleSigned:F1}° | scaleX:{s.x} | scaleY:{s.y}");
     }
@@ -78,57 +84,51 @@ public class Gun : MonoBehaviour
     // ---------- Shoot ----------
     private void HandleShooting()
     {
-        // Tek tek tıklama mı (GetMouseButtonDown) yoksa basılı tutma mı (GetMouseButton)?
         bool wantsToShoot = autoFire ? Input.GetMouseButton(0) : Input.GetMouseButtonDown(0);
-
-        // Cooldown kontrolü
         if (!wantsToShoot) return;
-        if (Time.time < nextFireTime) return; // <<< COOLDOWN
+        if (Time.time < nextFireTime) return;
 
-        // Atış
         FireOnce();
 
-        // Bir sonraki izinli atış zamanı
-        nextFireTime = Time.time + fireCooldown; // <<< COOLDOWN
+        nextFireTime = Time.time + fireCooldown;
     }
 
     private void FireOnce()
     {
-        if (bulletPrefab != null && firePoint != null)
+        if (bulletPrefab == null) return;
+
+        if (multiShot && bulletSpawns.Count > 0)
         {
+            // liste boyları eşit değilse eksikleri 0 derece kabul et
+            while (angleOffsetsDeg.Count < bulletSpawns.Count)
+                angleOffsetsDeg.Add(0f);
+
+            Vector3 mousePos = GetMouseWorldPosition();
+
+            for (int i = 0; i < bulletSpawns.Count; i++)
+            {
+                Transform spawn = bulletSpawns[i];
+                if (spawn == null) continue;
+
+                // mouse yönü
+                Vector2 baseDir = (mousePos - spawn.position).normalized;
+
+                // i. spawn için derece offset
+                float deg = angleOffsetsDeg[i];
+                Vector2 dir = RotateVector2(baseDir, deg);
+
+                SpawnBullet(spawn.position, dir);
+            }
+        }
+        else
+        {
+            // tek atış (firePoint’ten mouse yönüne)
+            if (firePoint == null) return;
             Vector3 mousePos = GetMouseWorldPosition();
             Vector2 dir = (mousePos - firePoint.position).normalized;
-
-            GameObject bullet = Instantiate(bulletPrefab, firePoint.position, Quaternion.identity);
-            bullet.transform.SetParent(null);
-
-            var rb = bullet.GetComponent<Rigidbody2D>();
-            if (rb != null)
-            {
-#if UNITY_6000_0_OR_NEWER || UNITY_2022_2_OR_NEWER
-                rb.linearVelocity = Vector2.zero;
-                rb.angularVelocity = 0f;
-                rb.gravityScale = 0f;
-                rb.linearDamping = 0f;
-                rb.linearVelocity = dir * bulletSpeed;
-#else
-                rb.velocity = Vector2.zero;
-                rb.angularVelocity = 0f;
-                rb.gravityScale = 0f;
-                rb.drag = 0f;
-                rb.velocity = dir * bulletSpeed;
-#endif
-            }
-
-            var bulletCol = bullet.GetComponent<Collider2D>();
-            var playerCol = parentToRotate ? parentToRotate.GetComponentInParent<Collider2D>() : null;
-            if (bulletCol != null && playerCol != null)
-                Physics2D.IgnoreCollision(bulletCol, playerCol, true);
-
-            Destroy(bullet, 2f);
+            SpawnBullet(firePoint.position, dir);
         }
 
-        // Muzzle flash ve event
         PlayMuzzleFlash();
 
         Vector3 mousePositionForEvent = GetMouseWorldPosition();
@@ -139,13 +139,44 @@ public class Gun : MonoBehaviour
         });
     }
 
+    private void SpawnBullet(Vector3 pos, Vector2 dir)
+    {
+        GameObject bullet = Instantiate(bulletPrefab, pos, Quaternion.identity);
+        bullet.transform.right = dir; // sprite sağ eksenine hizalıysa doğru bakar
+
+        var rb = bullet.GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+#if UNITY_6000_0_OR_NEWER || UNITY_2022_2_OR_NEWER
+            rb.linearVelocity = dir * bulletSpeed;
+#else
+            rb.velocity = dir * bulletSpeed;
+#endif
+            rb.angularVelocity = 0f;
+        }
+
+        // Kendi collider’ınla çarpışmayı kapat
+        var bulletCol = bullet.GetComponent<Collider2D>();
+        var ownerCol  = parentToRotate ? parentToRotate.GetComponentInParent<Collider2D>() : null;
+        if (bulletCol && ownerCol) Physics2D.IgnoreCollision(bulletCol, ownerCol, true);
+
+        Destroy(bullet, 2f);
+    }
+
+    private static Vector2 RotateVector2(Vector2 v, float degrees)
+    {
+        float rad = degrees * Mathf.Deg2Rad;
+        float cs = Mathf.Cos(rad), sn = Mathf.Sin(rad);
+        return new Vector2(v.x * cs - v.y * sn, v.x * sn + v.y * cs);
+    }
+
     private void PlayMuzzleFlash()
     {
         if (firePoint == null) return;
 
         if (muzzleFlashInstance != null)
         {
-            // muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
+            // parent'lı olduğu için local sıfırda; sadece Play
             muzzleFlashInstance.Play(true);
         }
         else if (muzzleFlashPrefab != null)

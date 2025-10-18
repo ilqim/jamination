@@ -1,12 +1,11 @@
 using System;
 using UnityEngine;
+using UnityEngine.UI; // Image
 using FirstGearGames.SmoothCameraShaker;
 
 public class PlayerController : MonoBehaviour
 {
-    // >>> Hasar olayı (zaten vardı)
     public static event Action<int> OnTakeDamage;
-    // >>> Fade isteği (ölümden sonra)
     public static event Action OnRequestFadeOut;
 
     [Header("Hareket Ayarları")]
@@ -14,9 +13,13 @@ public class PlayerController : MonoBehaviour
 
     [Header("Hasar / Ölüm Görseli")]
     [SerializeField] private SpriteRenderer spriteRenderer;
-    [SerializeField] private Color hitColor = Color.red;      // hasar flash rengi
-    [SerializeField] private float hitFlashDuration = 0.2f;   // kısa flash süresi
-    [SerializeField] private Color deathColor = new Color(1f, 0.2f, 0.2f); // ölümde kalıcı renk
+    [SerializeField] private Color hitColor = Color.red;
+    [SerializeField] private float hitFlashDuration = 0.2f;
+    [SerializeField] private Color deathColor = new Color(1f, 0.2f, 0.2f);
+
+    [Header("UI Referansları")]
+    [SerializeField] private Image dialogHintImage; // “E’ye basarak konuş”
+    [SerializeField] private Image doorHintImage;   // “E’ye basarak gir”
 
     public ShakeData shakeData;
 
@@ -28,9 +31,17 @@ public class PlayerController : MonoBehaviour
     private bool isFlashing = false;
     private bool isDead = false;
 
+    // --- Kapı değişkenleri (trigger) ---
+    private Door nearbyDoor = null;
+    private bool isNearDoor = false;
+
+    // --- Diyalog değişkenleri (COLLIDER) ---
+    private bool isNearDialog = false;   // diyalog collider’ı ile temas var mı
+    private bool dialogTriggered = false;
+
     private void OnEnable()
     {
-        PlayerHealth.OnPlayerDied += HandlePlayerDied; // >>> Ölümü dinle
+        PlayerHealth.OnPlayerDied += HandlePlayerDied;
     }
 
     private void OnDisable()
@@ -45,22 +56,57 @@ public class PlayerController : MonoBehaviour
 
         if (spriteRenderer == null)
             spriteRenderer = GetComponentInChildren<SpriteRenderer>();
-
         if (spriteRenderer != null)
             originalColor = spriteRenderer.color;
+
+        if (dialogHintImage) dialogHintImage.enabled = false;
+        if (doorHintImage) doorHintImage.enabled = false;
     }
 
     void Update()
     {
-        if (isDead) return; // öldüyse input alma
+        if (isDead) return;
 
+        // hareket
         moveInput.x = Input.GetAxisRaw("Horizontal");
         moveInput.y = Input.GetAxisRaw("Vertical");
         moveInput.Normalize();
 
+        // === KAPI (trigger + E) ===
+        if (isNearDoor && nearbyDoor != null)
+        {
+            if (doorHintImage) doorHintImage.enabled = true;
+            if (Input.GetKeyDown(KeyCode.E))
+            {
+                nearbyDoor.TryOpen();
+                return;
+            }
+        }
+        else
+        {
+            if (doorHintImage) doorHintImage.enabled = false;
+        }
+
+        // === DİYALOG (COLLIDER + E) ===
+        if (isNearDialog)
+        {
+            if (dialogHintImage) dialogHintImage.enabled = true;
+
+            if (!dialogTriggered && Input.GetKeyDown(KeyCode.E))
+            {
+                dialogTriggered = true;
+                DialogTypewriter.RequestStart();
+                return;
+            }
+        }
+        else
+        {
+            if (dialogHintImage) dialogHintImage.enabled = false;
+        }
+
+        // görünüm yönü
         Vector3 mousePos = Input.mousePosition;
         Vector3 charScreenPos = Camera.main.WorldToScreenPoint(transform.position);
-
         if (mousePos.x >= charScreenPos.x) { if (!facingRight) Flip(true); }
         else { if (facingRight) Flip(false); }
 
@@ -101,7 +147,7 @@ public class PlayerController : MonoBehaviour
         var prev = spriteRenderer.color;
         spriteRenderer.color = hitColor;
         yield return new WaitForSeconds(hitFlashDuration);
-        if (!isDead) spriteRenderer.color = prev; // ölmediyse geri dön
+        if (!isDead) spriteRenderer.color = prev;
         isFlashing = false;
     }
 
@@ -109,30 +155,73 @@ public class PlayerController : MonoBehaviour
     {
         isDead = true;
         if (spriteRenderer != null)
-            spriteRenderer.color = deathColor; // kalıcı olarak kırmızı ton
+            spriteRenderer.color = deathColor;
 
-        // İstersen animasyon/rigidbody kapat:
         if (animator) animator.SetFloat("Speed", 0f);
-
-        // Fade isteğini yayınla
         OnRequestFadeOut?.Invoke();
     }
 
-    // 2D çarpışma
-    private void OnCollisionEnter2D(Collision2D other)
+    // ====== KAPI: TRIGGER ENTER/EXIT ======
+    private void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.collider.CompareTag("DeathAreaPlayer"))
+        if (other.CompareTag("Door"))
         {
+            nearbyDoor = other.GetComponent<Door>();
+            isNearDoor = true;
+        }
+
+        if (other.CompareTag("DeathAreaPlayer"))
             Damage(1);
+
+        if (other.CompareTag("Diyalog"))
+        {
+            isNearDialog = true;
+            // not: dialogTriggered false kalır; E’ye basınca başlatılır
         }
     }
 
-    // Trigger kullanıyorsan bunu aç:
-    /*
-    private void OnTriggerEnter2D(Collider2D other)
+    private void OnTriggerExit2D(Collider2D other)
     {
-        if (other.CompareTag("DeathAreaPlayer"))
-            Damage(1);
+        if (other.CompareTag("Door"))
+        {
+            nearbyDoor = null;
+            isNearDoor = false;
+            if (doorHintImage) doorHintImage.enabled = false;
+        }
+
+        if (other.CompareTag("Diyalog"))
+        {
+            isNearDialog = false;
+            dialogTriggered = false; // tekrar temas edince yeniden E ile başlatılabilir
+            if (dialogHintImage) dialogHintImage.enabled = false;
+        }
     }
-    */
+
+    // ====== DİYALOG: COLLISION ENTER/EXIT ======
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.collider.CompareTag("DeathAreaPlayer"))
+            Damage(1);
+
+        // if (collision.collider.CompareTag("Diyalog"))
+        // {
+        //     isNearDialog = true;
+        //     // not: dialogTriggered false kalır; E’ye basınca başlatılır
+        // }
+    }
+
+    private void OnCollisionExit2D(Collision2D collision)
+    {
+        // if (collision.collider.CompareTag("Diyalog"))
+        // {
+        //     isNearDialog = false;
+        //     dialogTriggered = false; // tekrar temas edince yeniden E ile başlatılabilir
+        //     if (dialogHintImage) dialogHintImage.enabled = false;
+        // }
+    }
+
+    public static void RequestFadeOut()
+    {
+        OnRequestFadeOut?.Invoke();
+    }
 }
