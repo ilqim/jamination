@@ -40,7 +40,7 @@ public class Gun : MonoBehaviour
 
         if (muzzleFlashInstance != null && firePoint != null)
         {
-            muzzleFlashInstance.transform.position = firePoint.position;
+            // muzzleFlashInstance.transform.position = firePoint.position;
             muzzleFlashInstance.transform.rotation = firePoint.rotation;
         }
     }
@@ -67,10 +67,10 @@ public class Gun : MonoBehaviour
         else { s.x =  Mathf.Abs(s.x); s.y =  Mathf.Abs(s.y); }
         parentToRotate.localScale = s;
 
-        if (muzzleFlashInstance != null && firePoint != null)
-        {
-            muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
-        }
+        // if (muzzleFlashInstance != null && firePoint != null)
+        // {
+        //     muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
+        // }
 
         if (showDebug) Debug.Log($"angleSigned: {angleSigned:F1}° | scaleX:{s.x} | scaleY:{s.y}");
     }
@@ -145,7 +145,7 @@ public class Gun : MonoBehaviour
 
         if (muzzleFlashInstance != null)
         {
-            muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
+            // muzzleFlashInstance.transform.SetPositionAndRotation(firePoint.position, firePoint.rotation);
             muzzleFlashInstance.Play(true);
         }
         else if (muzzleFlashPrefab != null)
