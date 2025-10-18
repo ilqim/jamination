@@ -9,6 +9,7 @@ TagManager:
   - Heart
   - Door
   - Diyalog
+  - GameOver
   layers:
   - Default
   - TransparentFX
