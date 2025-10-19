@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 1d47ba2ed23877746bd2fb0a5fbd08a5
+guid: 2afdd835bca58834aa734b5dbf56c3a7
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -2204220314968907451
-    second: ChatGPT Image 18 Eki 2025 01_10_03_0
+      213: 5764919604839474325
+    second: ChatGPT Image 19 Eki 2025 15_34_45_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: ChatGPT Image 18 Eki 2025 01_10_03_0
+      name: ChatGPT Image 19 Eki 2025 15_34_45_0
       rect:
         serializedVersion: 2
         x: 0
         y: 0
-        width: 1024
-        height: 1024
+        width: 1016
+        height: 1019
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 541249f4d490961e0800000000000000
-      internalID: -2204220314968907451
+      spriteID: 594642536db110050800000000000000
+      internalID: 5764919604839474325
       vertices: []
       indices: 
       edges: []
@@ -161,7 +161,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      ChatGPT Image 18 Eki 2025 01_10_03_0: -2204220314968907451
+      ChatGPT Image 19 Eki 2025 15_34_45_0: 5764919604839474325
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

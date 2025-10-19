@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using UnityEngine;
 using FirstGearGames.SmoothCameraShaker;
 
@@ -11,14 +12,32 @@ public class Enemy : MonoBehaviour
     private int damageOnDeathArea;
 
     [Header("Hareket Ayarları")]
-    public Transform target;                 
+    public Transform target;
     [SerializeField] private float moveSpeed = 2f;
     [SerializeField] private float stopDistance = 0.5f;
 
-    [Header("Görsel Efekt")]
+    [Header("Görsel Efekt (Color Flash)")]
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private Color hitColor = Color.red;
     [SerializeField] private float hitFlashDuration = 0.2f;
+
+    [Header("Particle FX (Hasar/Ölüm)")]
+    [Tooltip("Sahnede duran, Play On Awake KAPALI instance'lar (opsiyonel)")]
+    [SerializeField] private ParticleSystem hitFxInstance;
+    [SerializeField] private ParticleSystem deathFxInstance;
+    [Tooltip("Prefab verirsen instantiate edilir (opsiyonel)")]
+    [SerializeField] private ParticleSystem hitFxPrefab;
+    [SerializeField] private ParticleSystem deathFxPrefab;
+    [Tooltip("Hit FX sprite'a child olsun mu? (Death FX her zaman bağımsız oluşturulur)")]
+    [SerializeField] private bool attachFxToSprite = true;
+    [Tooltip("Hit FX'i yüzey normaline hizala (2D için kabaca merkezden dışa doğru).")]
+    [SerializeField] private bool alignFxToNormal = false;
+
+    [Header("Ses Efektleri (Audio)")]
+    [SerializeField] private AudioSource audioSource;     // 🔊 Inspector’dan ver
+    [SerializeField] private AudioClip hitClip;           // hasar sesi
+    [SerializeField] private AudioClip deathClip;         // ölüm sesi
+    [Range(0f, 1f)] [SerializeField] private float audioVolume = 1f;
 
     [Header("Silah Kontrolü")]
     [SerializeField] private bool hasGun = true;
@@ -28,23 +47,24 @@ public class Enemy : MonoBehaviour
     [SerializeField] private float gunDeactivateRange = 5.5f;
 
     public ShakeData shakeData;
-
     public event Action OnEnemyDied;
 
     private Rigidbody2D rb2d;
     private Rigidbody rb3d;
+    private Collider2D myCol2D;
 
     private Color originalColor;
     private bool isFlashing = false;
     private bool isDead = false;
 
-    private bool facingRight = false; // şu an hangi yöne bakıyor
+    private bool facingRight = false;
 
     private void Awake()
     {
         currentHealth = Mathf.Max(1, maxHealth);
         rb2d = GetComponent<Rigidbody2D>();
         rb3d = GetComponent<Rigidbody>();
+        myCol2D = GetComponent<Collider2D>();
 
         if (spriteRenderer == null)
             spriteRenderer = GetComponentInChildren<SpriteRenderer>();
@@ -53,15 +73,21 @@ public class Enemy : MonoBehaviour
 
         if (hasGun && gun == null)
             gun = GetComponentInChildren<EnemyGun>(includeInactive: true);
-
         if (hasGun && gun != null)
             gun.enabled = false;
+
+        // AudioSource varsa ayarları sıfırla
+        if (audioSource != null)
+        {
+            audioSource.playOnAwake = false;
+            audioSource.loop = false;
+        }
     }
 
     private void Update()
     {
         HandleGunActivation();
-        HandleFacingDirection(); // 👈 yeni yön kontrolü
+        HandleFacingDirection();
     }
 
     private void FixedUpdate()
@@ -85,21 +111,13 @@ public class Enemy : MonoBehaviour
     {
         if (target == null || spriteRenderer == null) return;
 
-        // Hedef sağda mı solda mı?
-        if (target.position.x > transform.position.x && !facingRight)
-        {
-            Flip(false);
-        }
-        else if (target.position.x < transform.position.x && facingRight)
-        {
-            Flip(true);
-        }
+        if (target.position.x > transform.position.x && !facingRight) Flip(false);
+        else if (target.position.x < transform.position.x && facingRight) Flip(true);
     }
 
     private void Flip(bool lookRight)
     {
         facingRight = lookRight;
-
         Vector3 scale = transform.localScale;
         scale.x = lookRight ? Mathf.Abs(scale.x) : -Mathf.Abs(scale.x);
         transform.localScale = scale;
@@ -116,7 +134,6 @@ public class Enemy : MonoBehaviour
         }
 
         float dist = Vector2.Distance(transform.position, target.position);
-        // Debug.Log(dist);
 
         if (!gun.enabled && dist <= gunActivateRange)
             gun.enabled = true;
@@ -129,6 +146,7 @@ public class Enemy : MonoBehaviour
         if (isDead) return;
 
         currentHealth = Mathf.Max(0, currentHealth - Mathf.Abs(amount));
+        PlayHitSound(); // 🎧 vurulma sesi
         FlashColor();
 
         if (currentHealth <= 0)
@@ -139,6 +157,9 @@ public class Enemy : MonoBehaviour
     {
         if (isDead) return;
         isDead = true;
+
+        PlayDeathSound(); // 🎧 ölüm sesi
+        SpawnDeathFX(transform.position);
         CameraShakerHandler.Shake(shakeData);
         OnEnemyDied?.Invoke();
         Destroy(gameObject);
@@ -150,7 +171,7 @@ public class Enemy : MonoBehaviour
         StartCoroutine(FlashRoutine());
     }
 
-    private System.Collections.IEnumerator FlashRoutine()
+    private IEnumerator FlashRoutine()
     {
         isFlashing = true;
         spriteRenderer.color = hitColor;
@@ -159,18 +180,110 @@ public class Enemy : MonoBehaviour
         isFlashing = false;
     }
 
+    private void PlayHitFXAt(Vector3 pos)
+    {
+        Quaternion rot = Quaternion.identity;
+        if (alignFxToNormal)
+        {
+            Vector2 normal = ((Vector2)pos - (Vector2)transform.position).normalized;
+            float ang = Mathf.Atan2(normal.y, normal.x) * Mathf.Rad2Deg;
+            rot = Quaternion.Euler(0f, 0f, ang);
+        }
+
+        Transform parent = (attachFxToSprite && spriteRenderer != null) ? spriteRenderer.transform : null;
+
+        if (hitFxInstance != null)
+        {
+            var t = hitFxInstance.transform;
+            if (parent != null) t.SetParent(parent, worldPositionStays: false);
+            t.SetPositionAndRotation(pos, rot);
+            hitFxInstance.Play(true);
+        }
+        else if (hitFxPrefab != null)
+        {
+            var fx = Instantiate(hitFxPrefab, pos, rot, parent);
+            fx.Play(true);
+            DestroyAfterLifetime(fx);
+        }
+    }
+
+    private void SpawnDeathFX(Vector3 pos)
+    {
+        ParticleSystem fx = null;
+
+        if (deathFxInstance != null)
+            fx = Instantiate(deathFxInstance, pos, Quaternion.identity, null);
+        else if (deathFxPrefab != null)
+            fx = Instantiate(deathFxPrefab, pos, Quaternion.identity, null);
+
+        if (fx != null)
+        {
+            fx.Play(true);
+            DestroyAfterLifetime(fx);
+        }
+    }
+
+    private static void DestroyAfterLifetime(ParticleSystem ps)
+    {
+        var main = ps.main;
+        float life = main.duration;
+
+        switch (main.startLifetime.mode)
+        {
+            case ParticleSystemCurveMode.TwoConstants:
+                life += main.startLifetime.constantMax;
+                break;
+            case ParticleSystemCurveMode.TwoCurves:
+                life += Mathf.Max(main.startLifetime.constant, main.startLifetime.constantMax);
+                break;
+            default:
+                life += main.startLifetime.constant;
+                break;
+        }
+
+        UnityEngine.Object.Destroy(ps.gameObject, life + 0.1f);
+    }
+
     private void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.CompareTag("DeathArea"))
-        {
-            var b = other.GetComponent<Bullet>();
-            if (b != null)
-            {
-                damageOnDeathArea = b.damage;
-                Destroy(other.gameObject);
-                TakeDamage(damageOnDeathArea);
-            }
-        }
+        if (!other.CompareTag("DeathArea")) return;
+        var b = other.GetComponent<Bullet>();
+        if (b == null) return;
+
+        Vector3 hitPos = (myCol2D != null)
+            ? (Vector3)myCol2D.ClosestPoint(other.bounds.center)
+            : other.ClosestPoint(transform.position);
+
+        PlayHitFXAt(hitPos);
+        damageOnDeathArea = b.damage;
+        Destroy(other.gameObject);
+        TakeDamage(damageOnDeathArea);
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (!collision.collider.CompareTag("DeathArea")) return;
+        var b = collision.collider.GetComponent<Bullet>();
+        if (b == null) return;
+
+        Vector3 hitPos = collision.GetContact(0).point;
+        PlayHitFXAt(hitPos);
+        damageOnDeathArea = b.damage;
+        Destroy(collision.collider.gameObject);
+        TakeDamage(damageOnDeathArea);
+    }
+
+    // 🔊 Ses Fonksiyonları
+    private void PlayHitSound()
+    {
+        if (audioSource != null && hitClip != null)
+            audioSource.PlayOneShot(hitClip, audioVolume);
+    }
+
+    private void PlayDeathSound()
+    {
+        if (audioSource != null && deathClip != null)
+            audioSource.PlayOneShot(deathClip, audioVolume);
     }
 
     public void SetTarget(Transform newTarget) => target = newTarget;
@@ -183,7 +296,6 @@ public class Enemy : MonoBehaviour
         Gizmos.DrawWireSphere(transform.position, gunActivateRange);
         Gizmos.color = new Color(1f, .5f, 0f, .25f);
         Gizmos.DrawWireSphere(transform.position, gunDeactivateRange);
-
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(transform.position, stopDistance);
     }

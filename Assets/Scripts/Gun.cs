@@ -20,21 +20,29 @@ public class Gun : MonoBehaviour
     private float nextFireTime = 0f;
 
     [Header("Çok Mermili (Multi Shot)")]
-    [SerializeField] private bool multiShot = false;                   // ✅ işaretlersen çoklu atış
+    [SerializeField] private bool multiShot = false;
     [Tooltip("Child'lardaki BulletSpawn noktalarını sırayla (alttan üste) ekle")]
-    [SerializeField] private List<Transform> bulletSpawns = new();     // 0,1,2... alttan üste
+    [SerializeField] private List<Transform> bulletSpawns = new();
     [Tooltip("Her spawn için mouse yönüne göre derece cinsinden offset. (1. spawn için 0=mouse yönü)")]
-    [SerializeField] private List<float> angleOffsetsDeg = new();      // ör: [ -20, 0, +20 ]
+    [SerializeField] private List<float> angleOffsetsDeg = new();
 
     [Header("Muzzle Flash (Particle)")]
     public ParticleSystem muzzleFlashInstance;
     public ParticleSystem muzzleFlashPrefab;
 
+    [Header("Ateş Sesi (Audio)")]
+    [Tooltip("Ateş sesi çalacak AudioSource (örnek: silahın üstünde).")]
+    [SerializeField] private AudioSource fireAudioSource;
+    [Tooltip("Çalınacak AudioClip (tek atış sesi).")]
+    [SerializeField] private AudioClip fireClip;
+    [Range(0f, 1f)] [SerializeField] private float fireVolume = 1f;
+
     [Header("Debug")]
     public bool showDebug = false;
 
     public event EventHandler<OnShootEventArgs> OnShoot;
-    public class OnShootEventArgs : EventArgs {
+    public class OnShootEventArgs : EventArgs
+    {
         public Vector3 gunEndPointPosition;
         public Vector3 shootPosition;
         public Vector3 shellPosition;
@@ -46,12 +54,10 @@ public class Gun : MonoBehaviour
         if (firePoint == null && transform.childCount > 0) firePoint = transform.GetChild(0);
         if (shellEjectPoint == null) shellEjectPoint = firePoint;
 
-        // Muzzle flash’ı firePoint’e parent et (kayma olmasın)
-        if (muzzleFlashInstance != null && firePoint != null)
+        if (fireAudioSource != null)
         {
-            // muzzleFlashInstance.transform.SetParent(firePoint, worldPositionStays: true);
-            // muzzleFlashInstance.transform.localPosition = Vector3.zero;
-            // muzzleFlashInstance.transform.localRotation = Quaternion.identity;
+            fireAudioSource.playOnAwake = false;
+            fireAudioSource.loop = false;
         }
     }
 
@@ -67,15 +73,23 @@ public class Gun : MonoBehaviour
         if (parentToRotate == null) return;
 
         Vector3 mousePosition = GetMouseWorldPosition();
-        Vector3 aimDirection  = (mousePosition - parentToRotate.position).normalized;
+        Vector3 aimDirection = (mousePosition - parentToRotate.position).normalized;
 
         float angleSigned = Mathf.Atan2(aimDirection.y, aimDirection.x) * Mathf.Rad2Deg;
         parentToRotate.eulerAngles = new Vector3(0f, 0f, angleSigned);
 
-        // (Not: scale ile flip etmeyi önermem; mümkünse görselde flipX kullan)
+        // Flip scale
         Vector3 s = parentToRotate.localScale;
-        if (angleSigned > 90f || angleSigned < -90f) { s.x = -Mathf.Abs(s.x); s.y = -Mathf.Abs(s.y); }
-        else { s.x =  Mathf.Abs(s.x); s.y =  Mathf.Abs(s.y); }
+        if (angleSigned > 90f || angleSigned < -90f)
+        {
+            s.x = -Mathf.Abs(s.x);
+            s.y = -Mathf.Abs(s.y);
+        }
+        else
+        {
+            s.x = Mathf.Abs(s.x);
+            s.y = Mathf.Abs(s.y);
+        }
         parentToRotate.localScale = s;
 
         if (showDebug) Debug.Log($"angleSigned: {angleSigned:F1}° | scaleX:{s.x} | scaleY:{s.y}");
@@ -89,7 +103,6 @@ public class Gun : MonoBehaviour
         if (Time.time < nextFireTime) return;
 
         FireOnce();
-
         nextFireTime = Time.time + fireCooldown;
     }
 
@@ -99,7 +112,6 @@ public class Gun : MonoBehaviour
 
         if (multiShot && bulletSpawns.Count > 0)
         {
-            // liste boyları eşit değilse eksikleri 0 derece kabul et
             while (angleOffsetsDeg.Count < bulletSpawns.Count)
                 angleOffsetsDeg.Add(0f);
 
@@ -110,19 +122,14 @@ public class Gun : MonoBehaviour
                 Transform spawn = bulletSpawns[i];
                 if (spawn == null) continue;
 
-                // mouse yönü
                 Vector2 baseDir = (mousePos - spawn.position).normalized;
-
-                // i. spawn için derece offset
                 float deg = angleOffsetsDeg[i];
                 Vector2 dir = RotateVector2(baseDir, deg);
-
                 SpawnBullet(spawn.position, dir);
             }
         }
         else
         {
-            // tek atış (firePoint’ten mouse yönüne)
             if (firePoint == null) return;
             Vector3 mousePos = GetMouseWorldPosition();
             Vector2 dir = (mousePos - firePoint.position).normalized;
@@ -130,19 +137,21 @@ public class Gun : MonoBehaviour
         }
 
         PlayMuzzleFlash();
+        PlayFireSound(); // 🔊 Ateş sesi burada
 
         Vector3 mousePositionForEvent = GetMouseWorldPosition();
-        OnShoot?.Invoke(this, new OnShootEventArgs {
+        OnShoot?.Invoke(this, new OnShootEventArgs
+        {
             gunEndPointPosition = firePoint ? firePoint.position : transform.position,
-            shootPosition       = mousePositionForEvent,
-            shellPosition       = shellEjectPoint ? shellEjectPoint.position : (firePoint ? firePoint.position : transform.position),
+            shootPosition = mousePositionForEvent,
+            shellPosition = shellEjectPoint ? shellEjectPoint.position : (firePoint ? firePoint.position : transform.position),
         });
     }
 
     private void SpawnBullet(Vector3 pos, Vector2 dir)
     {
         GameObject bullet = Instantiate(bulletPrefab, pos, Quaternion.identity);
-        bullet.transform.right = dir; // sprite sağ eksenine hizalıysa doğru bakar
+        bullet.transform.right = dir;
 
         var rb = bullet.GetComponent<Rigidbody2D>();
         if (rb != null)
@@ -155,9 +164,8 @@ public class Gun : MonoBehaviour
             rb.angularVelocity = 0f;
         }
 
-        // Kendi collider’ınla çarpışmayı kapat
         var bulletCol = bullet.GetComponent<Collider2D>();
-        var ownerCol  = parentToRotate ? parentToRotate.GetComponentInParent<Collider2D>() : null;
+        var ownerCol = parentToRotate ? parentToRotate.GetComponentInParent<Collider2D>() : null;
         if (bulletCol && ownerCol) Physics2D.IgnoreCollision(bulletCol, ownerCol, true);
 
         Destroy(bullet, 2f);
@@ -176,7 +184,6 @@ public class Gun : MonoBehaviour
 
         if (muzzleFlashInstance != null)
         {
-            // parent'lı olduğu için local sıfırda; sadece Play
             muzzleFlashInstance.Play(true);
         }
         else if (muzzleFlashPrefab != null)
@@ -187,18 +194,25 @@ public class Gun : MonoBehaviour
         }
     }
 
+    // ---------- 🔊 Ateş sesi ----------
+    private void PlayFireSound()
+    {
+        if (fireAudioSource == null || fireClip == null)
+            return;
+
+        fireAudioSource.PlayOneShot(fireClip, fireVolume);
+    }
+
     // ---------- Utils ----------
-    public static Vector3 GetMouseWorldPosition() {
+    public static Vector3 GetMouseWorldPosition()
+    {
         Vector3 vec = GetMouseWorldPositionWithZ(Input.mousePosition, Camera.main);
-        vec.z = 0f; return vec;
+        vec.z = 0f;
+        return vec;
     }
-    public static Vector3 GetMouseWorldPositionWithZ() {
-        return GetMouseWorldPositionWithZ(Input.mousePosition, Camera.main);
-    }
-    public static Vector3 GetMouseWorldPositionWithZ(Camera worldCamera) {
-        return GetMouseWorldPositionWithZ(Input.mousePosition, worldCamera);
-    }
-    public static Vector3 GetMouseWorldPositionWithZ(Vector3 screenPosition, Camera worldCamera) {
+
+    public static Vector3 GetMouseWorldPositionWithZ(Vector3 screenPosition, Camera worldCamera)
+    {
         return worldCamera.ScreenToWorldPoint(screenPosition);
     }
 }

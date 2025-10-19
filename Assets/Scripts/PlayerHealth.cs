@@ -18,22 +18,25 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private int currentHearts = 3;
 
     [Header("Ölüm Ekranı / Panel")]
-    [SerializeField] private GameObject deathPanel;   // otomatik bulunacak
+    [SerializeField] private GameObject deathPanel;
     private const string GameOverTag = "GameOver";
 
     public List<Image> heartImages = new List<Image>();
     private bool isDead = false;
 
+    [SerializeField] private int checkpointHearts;
+    private bool firstGameplayCheckpointSet = false;
+
     void Awake()
     {
-        // Tekil kal
         var all = FindObjectsOfType<PlayerHealth>();
         if (all.Length > 1) { Destroy(gameObject); return; }
 
         if (dontDestroyOnLoad)
             DontDestroyOnLoad(gameObject);
 
-        // İlk sahnede varsa yakala
+        checkpointHearts = maxHearts;
+
         TryBindDeathPanel();
         if (deathPanel) deathPanel.SetActive(false);
     }
@@ -60,27 +63,57 @@ public class PlayerHealth : MonoBehaviour
 
     void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        // Sahne yüklenir yüklenmez dene…
-        TryBindDeathPanel();
-        if (deathPanel) deathPanel.SetActive(false);
-
-        // …ve bir frame SONRA tekrar dene (UI instantiate gecikmesi için)
-        StartCoroutine(TryBindDeathPanelNextFrame());
+        // === HER SAHNEDE DEATH PANELİ TEKRAR ARA ===
+        StartCoroutine(RebindDeathPanelRoutine(scene));
 
         FindHeartsInScene();
         if (heartImages.Count > 0)
             maxHearts = Mathf.Max(maxHearts, heartImages.Count);
         RefreshHeartsUI();
+
+        Debug.Log($"[PlayerHealth] SceneLoaded: '{scene.name}' | currentHearts={currentHearts}, checkpointHearts={checkpointHearts}");
+
+        // === CHECKPOINT MANTIĞI ===
+        if (isDead)
+        {
+            currentHearts = Mathf.Clamp(checkpointHearts, 0, maxHearts);
+            isDead = false;
+            RefreshHeartsUI();
+
+            Debug.Log($"[PlayerHealth] SceneLoaded-AfterDeath: '{scene.name}' | currentHearts RESET to checkpoint={currentHearts}");
+        }
+        else
+        {
+            if (!firstGameplayCheckpointSet)
+            {
+                checkpointHearts = maxHearts;
+                firstGameplayCheckpointSet = true;
+                Debug.Log($"[PlayerHealth] First gameplay checkpoint set: {checkpointHearts}");
+            }
+            else
+            {
+                checkpointHearts = Mathf.Clamp(currentHearts, 0, maxHearts);
+                Debug.Log($"[PlayerHealth] Checkpoint updated on scene enter: '{scene.name}' | checkpointHearts={checkpointHearts}");
+            }
+        }
     }
 
-    System.Collections.IEnumerator TryBindDeathPanelNextFrame()
+    // 🔁 Paneli güvenli şekilde yeniden bulma (birkaç frame bekleyerek)
+    private System.Collections.IEnumerator RebindDeathPanelRoutine(Scene scene)
     {
-        yield return null; // 1 frame bekle
-        if (deathPanel == null)
+        for (int i = 0; i < 5; i++) // 5 frame boyunca tekrar dene
         {
             TryBindDeathPanel();
-            if (deathPanel) deathPanel.SetActive(false);
+            if (deathPanel != null)
+            {
+                deathPanel.SetActive(false);
+                Debug.Log($"[PlayerHealth] DeathPanel bound successfully on scene '{scene.name}' at frame {i}.");
+                yield break;
+            }
+            yield return null; // 1 frame bekle
         }
+
+        Debug.LogWarning($"[PlayerHealth] Could NOT find DeathPanel in scene '{scene.name}' after multiple tries!");
     }
 
     void TryBindDeathPanel()
@@ -88,20 +121,22 @@ public class PlayerHealth : MonoBehaviour
         deathPanel = FindGameOverAnywhereInMemory();
     }
 
-    // --- TÜM objeler arasından (inaktif dahil) bu sahneye ait GameOver tag'lisini bulur ---
     GameObject FindGameOverAnywhereInMemory()
     {
         var current = SceneManager.GetActiveScene();
         var all = Resources.FindObjectsOfTypeAll<GameObject>();
-        // Önce aktif sahnedekini ara
+
+        // Önce aktif sahnede ara
         foreach (var go in all)
         {
             if (!go) continue;
             if (!go.CompareTag(GameOverTag)) continue;
             if (!go.scene.IsValid()) continue;
-            if (go.scene == current) return go;
+            if (go.scene == current)
+                return go;
         }
-        // Bulunamadıysa DontDestroyOnLoad sahnesine de bak (opsiyonel)
+
+        // Eğer bulamazsa DontDestroyOnLoad sahnesine bak
         foreach (var go in all)
         {
             if (!go) continue;
@@ -134,7 +169,10 @@ public class PlayerHealth : MonoBehaviour
     {
         if (isDead) return;
 
+        int prevHearts = currentHearts;
         currentHearts = Mathf.Max(0, currentHearts - amount);
+
+        Debug.Log($"[PlayerHealth] Damage taken: {amount} | {prevHearts} -> {currentHearts} (checkpoint={checkpointHearts})");
 
         int indexToHide = currentHearts;
         if (indexToHide >= 0 && indexToHide < heartImages.Count)
@@ -143,15 +181,25 @@ public class PlayerHealth : MonoBehaviour
         if (currentHearts <= 0 && !isDead)
         {
             isDead = true;
-            Debug.Log("Player öldü (can bitti).");
+            Debug.Log("[PlayerHealth] Player died. Opening deathPanel.");
 
-            if (!deathPanel)
-                TryBindDeathPanel(); // son bir kez dene
+            TryBindDeathPanel();
 
             if (deathPanel)
                 deathPanel.SetActive(true);
+            else
+                Debug.LogWarning("[PlayerHealth] DeathPanel not found!");
 
             OnPlayerDied?.Invoke();
         }
     }
+
+    public void ResetToCheckpointHearts()
+    {
+        currentHearts = Mathf.Clamp(checkpointHearts, 0, maxHearts);
+        RefreshHeartsUI();
+    }
+
+    public int GetCurrentHearts() => currentHearts;
+    public int GetCheckpointHearts() => checkpointHearts;
 }
